@@ -1,0 +1,17 @@
+[package]
+name = "turso-mappers-derive"
+version = "0.1.0"
+edition = "2024"
+description = "Derive macros for turso-mappers"
+license = "MIT"
+repository = "https://github.com/stevewillcock/turso-mappers"
+
+
+[dependencies]
+quote = "1.0.40"
+syn = "2.0.104"
+proc-macro2 = "1"
+
+[lib]
+proc-macro = true
+
