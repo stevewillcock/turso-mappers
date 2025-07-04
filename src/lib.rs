@@ -81,8 +81,11 @@ pub trait TryFromRow {
 #[cfg(test)]
 mod tests {
     use crate::{MapRows, TursoMapperError};
-    use turso::Builder;
+    use turso::{Builder, Row};
+    use turso_core::types::Text;
+    use super::TryFromRow;
 
+    #[derive(TryFromRow)]
     struct Customer {
         id: i64,
         name: String,
@@ -137,25 +140,61 @@ mod tests {
 
         let rows = conn.query("SELECT * FROM customer;", ()).await?;
 
-        let customers = rows.map_rows(|row|{
-            Ok(Customer {
-                id: *row
-                    .get_value(0)?
-                    .as_integer()
-                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
-                name: row
-                    .get_value(1)?
-                    .as_text()
-                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
-                    .clone(),
+        let customers = rows
+            .map_rows(|row| {
+                Ok(Customer {
+                    id: *row
+                        .get_value(0)?
+                        .as_integer()
+                        .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+                    name: row
+                        .get_value(1)?
+                        .as_text()
+                        .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                        .clone(),
+                })
             })
-        }).await?;
+            .await?;
 
         assert_eq!(customers.len(), 2);
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[0].name, "Charlie");
         assert_eq!(customers[1].name, "Sarah");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn can_map_row_manually() -> Result<(), TursoMapperError> {
+        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+
+        let customer = Customer {
+            id: *row
+                .get_value(0)?
+                .as_integer()
+                .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+            name: row
+                .get_value(1)?
+                .as_text()
+                .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                .clone(),
+        };
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn can_map_row_with_derive_macro() -> Result<(), TursoMapperError> {
+        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+
+        let customer = Customer::try_from_row(row)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
 
         Ok(())
     }

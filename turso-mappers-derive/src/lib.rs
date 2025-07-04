@@ -24,7 +24,7 @@ fn impl_from_trait_for_row(ast: DeriveInput) -> proc_macro2::TokenStream {
         .map(|(idx, field)| {
             let f_ident = field.ident.unwrap();
             let f_type = field.ty;
-            // This is very closely based on code from turso_derive
+            // This is very closely based on code from tiberius_derive
             quote! {
                     #f_ident: {
                         macro_rules! read_data {
