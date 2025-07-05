@@ -17,8 +17,8 @@ the [documentation](https://docs.rs/crate/turso-mappers/latest) for more informa
 
 This is a work in progress. Currently, the following functionality is implemented.
 
-- The `TryFromRow` derive macro is implemented (for simple cases only)
 - `map_rows` from `MapRows` is implemented to allow mapping over rows
+- The `TryFromRow` derive macro is implemented (as a proof of concept, for simple cases only)
 
 ```rust
 use turso_mappers::MapRows;
