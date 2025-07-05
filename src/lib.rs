@@ -43,7 +43,6 @@ impl std::fmt::Display for TursoMapperError {
 
 impl std::error::Error for TursoMapperError {}
 
-/// A Result type alias for TursoMapperError
 pub type TursoMapperResult<T> = Result<T, TursoMapperError>;
 
 pub trait MapRows {
