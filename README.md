@@ -21,21 +21,24 @@ This is a work in progress. Currently, the following functionality is implemente
 - `map_rows` from `MapRows` is implemented to allow mapping over rows
 
 ```rust
+use turso_mappers::MapRows;
+use turso_mappers::TryFromRow;
+use turso_mappers::TursoMapperResult;
+use turso_mappers::TursoMapperError;
+use turso_core::types::Text;
+use turso::Row;
 
-use turso_mappers::{TryFromRow, MapRows};
-
-#[derive(TryFromRow)] // Derive the TryFromRow trait on our struct
+#[derive(TryFromRow)]
 pub struct Customer {
     pub id: i64,
     pub first_name: String,
     pub last_name: String,
-    // Note: Option<String> is not currently supported by the derive macro
+    // Note: Option<> is not currently supported by the derive macro
     // pub description: Option<String>,
 }
 
 pub async fn print_customers(rows: turso::Rows) -> Result<(), Box<dyn std::error::Error>> {
 
-    // Use the map_rows method to map each row to a Customer struct
     let customers: Vec<Customer> = rows
             .map_rows(Customer::try_from_row)
             .await?;
@@ -45,6 +48,11 @@ pub async fn print_customers(rows: turso::Rows) -> Result<(), Box<dyn std::error
     }
 
     Ok(())
+}
+
+fn main() {
+    // Get rows from the database and call print_customers, needs to be inside an async runtime (e.g. tokio::main)
+    // main required here to allow doctest with macro to compile
 }
 
 
