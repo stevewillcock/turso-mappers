@@ -15,7 +15,7 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                 }
             }
         }
-        _ => panic!("turso-mappers only supports structs"),
+        _ => panic!("turso_mappers::TryFromRow only supports structs"),
     };
 
     let field_mappers: Vec<proc_macro2::TokenStream> = fields
