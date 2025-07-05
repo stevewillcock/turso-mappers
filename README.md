@@ -27,32 +27,41 @@ use turso_mappers::TursoMapperResult;
 use turso_mappers::TursoMapperError;
 use turso_core::types::Text;
 use turso::Row;
+use turso::Builder;
 
 #[derive(TryFromRow)]
 pub struct Customer {
     pub id: i64,
-    pub first_name: String,
-    pub last_name: String,
+    pub name: String,
     // Note: Option<> is not currently supported by the derive macro
     // pub description: Option<String>,
 }
 
-pub async fn print_customers(rows: turso::Rows) -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> TursoMapperResult<()> {
 
-    let customers: Vec<Customer> = rows
-            .map_rows(Customer::try_from_row)
-            .await?;
+    let db = Builder::new_local(":memory:").build().await?;
+    let conn = db.connect()?;
 
-    for customer in customers {
-        println!("Customer: {} - {:?} - {:?}", customer.id, customer.first_name, customer.last_name);
-    }
+    conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
+    conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
+    conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+
+    let customers = conn
+        .query("SELECT id, name FROM customer;", ())
+        .await?
+        .map_rows(Customer::try_from_row)
+        .await?;
+
+    assert_eq!(customers.len(), 2);
+
+    assert_eq!(customers[0].id, 1);
+    assert_eq!(customers[0].name, "Charlie");
+    assert_eq!(customers[1].id, 2);
+    assert_eq!(customers[1].name, "Sarah");
 
     Ok(())
-}
 
-fn main() {
-    // Get rows from the database and call print_customers, needs to be inside an async runtime (e.g. tokio::main)
-    // main required here to allow doctest with macro to compile
 }
 
 
