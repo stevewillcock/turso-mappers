@@ -73,22 +73,44 @@ impl MapRows for turso::Rows {
 /// Defines a conversion from a turso::Row to a struct.
 pub trait TryFromRow {
     /// Try to convert from a turso::Row to a struct. Returns a Result using the turso::error::Error type.
-    fn try_from_row(row: turso::Row) -> Result<Self, turso::Error>
+    fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{TryFromRow, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
     use turso_core::types::Text;
-    use super::TryFromRow;
 
-    #[derive(TryFromRow)]
-    struct Customer {
+    struct CustomerWithManualMapping {
         id: i64,
         name: String,
+    }
+
+    // #[derive(TryFromRow)]
+    struct CustomerWithDeriveMacro {
+        id: i64,
+        name: String,
+    }
+
+    // Manual TryFromRow implementation for Customer
+    impl TryFromRow for CustomerWithManualMapping {
+        fn try_from_row(row: turso::Row) -> TursoMapperResult<Self> {
+            Ok(CustomerWithManualMapping {
+                id: *row
+                    .get_value(0)?
+                    .as_integer()
+                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+                name: row
+                    .get_value(1)?
+                    .as_text()
+                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                    .clone(),
+            })
+        }
     }
 
     #[tokio::test]
@@ -105,7 +127,7 @@ mod tests {
         let mut customers = vec![];
 
         while let Some(row) = rows.next().await? {
-            customers.push(Customer {
+            customers.push(CustomerWithManualMapping {
                 id: *row
                     .get_value(0)?
                     .as_integer()
@@ -142,7 +164,7 @@ mod tests {
 
         let customers = rows
             .map_rows(|row| {
-                Ok(Customer {
+                Ok(CustomerWithManualMapping {
                     id: *row
                         .get_value(0)?
                         .as_integer()
@@ -169,7 +191,7 @@ mod tests {
     async fn can_map_row_manually() -> Result<(), TursoMapperError> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
-        let customer = Customer {
+        let customer = CustomerWithManualMapping {
             id: *row
                 .get_value(0)?
                 .as_integer()
@@ -188,10 +210,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn can_map_row_with_manual_try_from_row_impl() -> Result<(), TursoMapperError> {
+        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+
+        let customer = CustomerWithManualMapping::try_from_row(row)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn can_map_row_with_derive_macro() -> Result<(), TursoMapperError> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
-        let customer = Customer::try_from_row(row)?;
+        let customer = CustomerWithManualMapping::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
