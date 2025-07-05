@@ -90,7 +90,7 @@ mod tests {
         name: String,
     }
 
-    // #[derive(TryFromRow)]
+    #[derive(TryFromRow)]
     struct CustomerWithDeriveMacro {
         id: i64,
         name: String,
@@ -225,7 +225,7 @@ mod tests {
     async fn can_map_row_with_derive_macro() -> Result<(), TursoMapperError> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
-        let customer = CustomerWithManualMapping::try_from_row(row)?;
+        let customer = CustomerWithDeriveMacro::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");

@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Field, Ident};
+use syn::{DeriveInput, Field, Ident, Type};
 
-fn impl_from_trait_for_row(ast: DeriveInput) -> proc_macro2::TokenStream {
+fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
     let ident: Ident = ast.ident;
 
     let mut fields: Vec<Field> = vec![];
@@ -24,34 +24,39 @@ fn impl_from_trait_for_row(ast: DeriveInput) -> proc_macro2::TokenStream {
         .map(|(idx, field)| {
             let f_ident = field.ident.unwrap();
             let f_type = field.ty;
-            // This is very closely based on code from tiberius_derive
-            quote! {
-                    #f_ident: {
-                        macro_rules! read_data {
-                            (Option<$f_type: ty>) => { {
-                                    <$f_type as turso::FromSqlOwned>::from_sql_owned(
-                                        row_iter.next().ok_or_else(|| turso::error::Error::Conversion(format!("Could not find field {} from column with index {}", stringify!(#f_ident), #idx).into()))?
-                            ).map_err(|e| turso::error::Error::Conversion(format!("Could not convert type for optional field {} from column index {} with underlying error {}", stringify!(#f_ident), #idx, e).into()))?
-                               } };
-                            ($f_type: ty) => { {
-                                (<$f_type as turso::FromSqlOwned>::from_sql_owned(
-                                    row_iter.next().ok_or_else(|| turso::error::Error::Conversion(format!("Could not find field {} from column with index {}", stringify!(#f_ident), #idx).into()))?
-                                ).map_err(|e| turso::error::Error::Conversion(format!("Could not convert type for non optional field {} from column index {} with underlying error {}", stringify!(#f_ident), #idx, e).into()))?
-                                ).ok_or_else(|| turso::error::Error::Conversion(format!(r"None value for non optional field {} from column with index {}", stringify!(#f_ident), #idx).into()))?
-                            }};
-                        };
 
-                        read_data!(#f_type)
+            // Generate code based on the manual implementation
+            let type_path = get_type_path(&f_type);
+
+            // Handle different types based on the field type
+            if type_path == "i64" {
+                quote! {
+                    #f_ident: *row
+                        .get_value(#idx)?
+                        .as_integer()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", stringify!(#f_ident))))?
+                }
+            } else if type_path == "String" {
+                quote! {
+                    #f_ident: row
+                        .get_value(#idx)?
+                        .as_text()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", stringify!(#f_ident))))?
+                        .clone()
+                }
+            } else {
+                // For unsupported types, generate a compile-time error
+                let error_msg = format!("Unsupported type: {}", type_path);
+                quote! {
+                    #f_ident: compile_error!(#error_msg)
                 }
             }
         })
         .collect::<Vec<_>>();
 
     quote! {
-        impl TryFromRow for #ident {
-
-            fn try_from_row(row: turso::Row) -> Result<Self, turso::error::Error> where Self: Sized {
-                let mut row_iter = row.into_iter();
+        impl crate::TryFromRow for #ident {
+            fn try_from_row(row: turso::Row) -> crate::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })
@@ -60,8 +65,19 @@ fn impl_from_trait_for_row(ast: DeriveInput) -> proc_macro2::TokenStream {
     }
 }
 
+// Helper function to extract the type path from a Type
+fn get_type_path(ty: &Type) -> String {
+    match ty {
+        Type::Path(type_path) if !type_path.path.segments.is_empty() => {
+            let segment = &type_path.path.segments[0];
+            segment.ident.to_string()
+        }
+        _ => "unknown".to_string(),
+    }
+}
+
 #[proc_macro_derive(TryFromRow)]
-pub fn from_row_derive_macro_owned(input: TokenStream) -> TokenStream {
+pub fn try_from_row_derive(input: TokenStream) -> TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
-    impl_from_trait_for_row(ast).into()
+    impl_try_from_row(ast).into()
 }
