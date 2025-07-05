@@ -6,7 +6,6 @@ pub use turso_mappers_derive::TryFromRow;
 #[cfg(doctest)]
 pub struct ReadmeDocTests;
 
-
 #[derive(Debug)]
 pub enum TursoMapperError {
     ColumnNotFound(String),
@@ -98,7 +97,7 @@ mod tests {
 
     // Manual TryFromRow implementation for Customer
     impl TryFromRow for CustomerWithManualMapping {
-        fn try_from_row(row: turso::Row) -> TursoMapperResult<Self> {
+        fn try_from_row(row: Row) -> TursoMapperResult<Self> {
             Ok(CustomerWithManualMapping {
                 id: *row
                     .get_value(0)?
@@ -114,7 +113,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_get_structs_manually() -> Result<(), TursoMapperError> {
+    async fn can_get_structs_manually() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
@@ -152,7 +151,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_get_structs_using_map() -> Result<(), TursoMapperError> {
+    async fn can_get_structs_using_map() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
@@ -188,7 +187,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_manually() -> Result<(), TursoMapperError> {
+    async fn can_map_row_manually() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
         let customer = CustomerWithManualMapping {
@@ -210,7 +209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_with_manual_try_from_row_impl() -> Result<(), TursoMapperError> {
+    async fn can_map_row_with_manual_try_from_row_impl() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
         let customer = CustomerWithManualMapping::try_from_row(row)?;
@@ -222,13 +221,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_with_derive_macro() -> Result<(), TursoMapperError> {
+    async fn can_map_row_with_derive_macro() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
         let customer = CustomerWithDeriveMacroMapping::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn end_to_end_test() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
+        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+
+        let customers = conn
+            .query("SELECT * FROM customer;", ())
+            .await?
+            .map_rows(CustomerWithDeriveMacroMapping::try_from_row)
+            .await?;
+
+        assert_eq!(customers.len(), 2);
+
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[1].name, "Sarah");
 
         Ok(())
     }
