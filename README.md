@@ -48,13 +48,10 @@ async fn main() -> TursoMapperResult<()> {
     conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
 
     let customers = conn
-        .query("SELECT id, name FROM customer;", ())
-        .await?
-        .map_rows(Customer::try_from_row)
-        .await?;
+        .query("SELECT id, name FROM customer;", ()).await?
+        .map_rows(Customer::try_from_row).await?;
 
     assert_eq!(customers.len(), 2);
-
     assert_eq!(customers[0].id, 1);
     assert_eq!(customers[0].name, "Charlie");
     assert_eq!(customers[1].id, 2);

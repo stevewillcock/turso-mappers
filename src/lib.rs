@@ -69,9 +69,7 @@ impl MapRows for turso::Rows {
     }
 }
 
-/// Defines a conversion from a turso::Row to a struct.
 pub trait TryFromRow {
-    /// Try to convert from a turso::Row to a struct. Returns a Result using the turso::error::Error type.
     fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
     where
         Self: Sized;
@@ -84,21 +82,14 @@ mod tests {
     use turso::{Builder, Row};
     use turso_core::types::Text;
 
-    struct CustomerWithManualMapping {
+    struct CustomerWithManualTryFromRow {
         id: i64,
         name: String,
     }
 
-    #[derive(TryFromRow)]
-    struct CustomerWithDeriveMacroMapping {
-        id: i64,
-        name: String,
-    }
-
-    // Manual TryFromRow implementation for Customer
-    impl TryFromRow for CustomerWithManualMapping {
+    impl TryFromRow for CustomerWithManualTryFromRow {
         fn try_from_row(row: Row) -> TursoMapperResult<Self> {
-            Ok(CustomerWithManualMapping {
+            Ok(CustomerWithManualTryFromRow {
                 id: *row
                     .get_value(0)?
                     .as_integer()
@@ -112,42 +103,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn can_get_structs_manually() -> TursoMapperResult<()> {
-        let db = Builder::new_local(":memory:").build().await?;
-        let conn = db.connect()?;
-
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
-
-        let mut rows = conn.query("SELECT * FROM customer;", ()).await?;
-
-        let mut customers = vec![];
-
-        while let Some(row) = rows.next().await? {
-            customers.push(CustomerWithManualMapping {
-                id: *row
-                    .get_value(0)?
-                    .as_integer()
-                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
-                name: row
-                    .get_value(1)?
-                    .as_text()
-                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
-                    .clone(),
-            });
-        }
-
-        assert!(rows.next().await?.is_none());
-
-        assert_eq!(customers.len(), 2);
-        assert_eq!(customers[0].id, 1);
-        assert_eq!(customers[1].id, 2);
-        assert_eq!(customers[0].name, "Charlie");
-        assert_eq!(customers[1].name, "Sarah");
-
-        Ok(())
+    #[derive(TryFromRow)]
+    struct Customer {
+        id: i64,
+        name: String,
     }
 
     #[tokio::test]
@@ -163,7 +122,7 @@ mod tests {
 
         let customers = rows
             .map_rows(|row| {
-                Ok(CustomerWithManualMapping {
+                Ok(CustomerWithManualTryFromRow {
                     id: *row
                         .get_value(0)?
                         .as_integer()
@@ -187,20 +146,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_manually() -> TursoMapperResult<()> {
+    async fn manual_try_from_row_impl_works() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
-        let customer = CustomerWithManualMapping {
-            id: *row
-                .get_value(0)?
-                .as_integer()
-                .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
-            name: row
-                .get_value(1)?
-                .as_text()
-                .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
-                .clone(),
-        };
+        let customer = CustomerWithManualTryFromRow::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -209,10 +158,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_with_manual_try_from_row_impl() -> TursoMapperResult<()> {
+    async fn derive_macro_try_from_row_impl_works() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
 
-        let customer = CustomerWithManualMapping::try_from_row(row)?;
+        let customer = Customer::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -221,19 +170,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn can_map_row_with_derive_macro() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+    async fn end_to_end_test_with_manual_mapping() -> TursoMapperResult<()> {
+        // Note that this is not testing anything in this crate, it's just here as a functional baseline and to compare to
+        // end_to_end_test_with_map_rows_and_try_from_row
 
-        let customer = CustomerWithDeriveMacroMapping::try_from_row(row)?;
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
 
-        assert_eq!(customer.id, 1);
-        assert_eq!(customer.name, "Charlie");
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
+        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+
+        let mut rows = conn.query("SELECT id, name FROM customer;", ()).await?;
+
+        let mut customers = vec![];
+
+        while let Some(row) = rows.next().await? {
+            customers.push(Customer {
+                id: *row
+                    .get_value(0)?
+                    .as_integer()
+                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+                name: row
+                    .get_value(1)?
+                    .as_text()
+                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                    .clone(),
+            });
+        }
+
+        assert_eq!(customers.len(), 2);
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[1].name, "Sarah");
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn end_to_end_test() -> TursoMapperResult<()> {
+    async fn end_to_end_test_with_map_rows_and_try_from_row() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
@@ -242,13 +218,10 @@ mod tests {
         conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
 
         let customers = conn
-            .query("SELECT * FROM customer;", ())
-            .await?
-            .map_rows(CustomerWithDeriveMacroMapping::try_from_row)
-            .await?;
+            .query("SELECT id, name FROM customer;", ()).await?
+            .map_rows(Customer::try_from_row).await?;
 
         assert_eq!(customers.len(), 2);
-
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[0].name, "Charlie");
