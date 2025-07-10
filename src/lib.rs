@@ -252,6 +252,7 @@ mod tests {
 
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
 
         Ok(())
     }
