@@ -80,6 +80,7 @@ mod tests {
     use super::{TryFromRow, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
+    use turso_core::Value;
     use turso_core::types::Text;
 
     struct CustomerWithManualTryFromRow {
@@ -122,6 +123,16 @@ mod tests {
         image: Vec<u8>,
     }
 
+    #[derive(TryFromRow)]
+    struct CustomerWithOptions {
+        id: i64,
+        name: String,
+        optional_value: Option<f64>,
+        optional_note: Option<String>,
+        optional_data: Option<Vec<u8>>,
+        optional_count: Option<i64>,
+    }
+
     #[tokio::test]
     async fn can_get_values_using_map() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
@@ -161,10 +172,10 @@ mod tests {
     async fn manual_try_from_row_impl_works() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter(
             [
-                turso_core::Value::Integer(1),
-                turso_core::Value::Text(Text::new("Charlie")),
-                turso_core::Value::Float(3.12),
-                turso_core::Value::Blob(vec![1, 2, 3]),
+                Value::Integer(1),
+                Value::Text(Text::new("Charlie")),
+                Value::Float(3.12),
+                Value::Blob(vec![1, 2, 3]),
             ]
             .iter(),
         );
@@ -183,10 +194,10 @@ mod tests {
     async fn derive_macro_try_from_row_impl_works() -> TursoMapperResult<()> {
         let row: Row = Row::from_iter(
             [
-                turso_core::Value::Integer(1),
-                turso_core::Value::Text(Text::new("Charlie")),
-                turso_core::Value::Float(3.12),
-                turso_core::Value::Blob(vec![1, 2, 3]),
+                Value::Integer(1),
+                Value::Text(Text::new("Charlie")),
+                Value::Float(3.12),
+                Value::Blob(vec![1, 2, 3]),
             ]
             .iter(),
         );
@@ -235,6 +246,55 @@ mod tests {
         assert_eq!(customers[1].name, "Sarah");
         assert_eq!(customers[1].value, 0.99);
         assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn option_types_support_works() -> TursoMapperResult<()> {
+        // Test with a manually created Row with some NULL values
+        let row: Row = Row::from_iter(
+            [
+                Value::Integer(1),
+                Value::Text(Text::new("Charlie")),
+                Value::Float(3.12),
+                Value::Null,
+                Value::Blob(vec![1, 2, 3]),
+                Value::Null,
+            ]
+            .iter(),
+        );
+
+        let customer = CustomerWithOptions::try_from_row(row)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.optional_value, Some(3.12));
+        assert_eq!(customer.optional_note, None);
+        assert_eq!(customer.optional_data, Some(vec![1, 2, 3]));
+        assert_eq!(customer.optional_count, None);
+
+        // Test with a Row with all non-NULL values
+        let row: Row = Row::from_iter(
+            [
+                Value::Integer(2),
+                Value::Text(Text::new("Sarah")),
+                Value::Float(0.99),
+                Value::Text(Text::new("Some note")),
+                Value::Blob(vec![9, 8, 7, 6]),
+                Value::Integer(42),
+            ]
+            .iter(),
+        );
+
+        let customer = CustomerWithOptions::try_from_row(row)?;
+
+        assert_eq!(customer.id, 2);
+        assert_eq!(customer.name, "Sarah");
+        assert_eq!(customer.optional_value, Some(0.99));
+        assert_eq!(customer.optional_note, Some("Some note".to_string()));
+        assert_eq!(customer.optional_data, Some(vec![9, 8, 7, 6]));
+        assert_eq!(customer.optional_count, Some(42));
 
         Ok(())
     }
