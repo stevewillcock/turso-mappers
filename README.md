@@ -2,8 +2,8 @@
 
 Row mappers for turso
 
-[//]: # (See the [published crate]&#40;https://crates.io/crates/turso-mappers&#41; and)
-[//]: # (the [documentation]&#40;https://docs.rs/crate/turso-mappers/latest&#41; for more information.)
+See the [published crate](https://crates.io/crates/turso-mappers) and
+the [documentation](https://docs.rs/crate/turso-mappers/latest) for more information.
 
 - Allows you to map turso rows to structs more easily
 - Provides a `MapRows` trait with a `map_rows` method for easily mapping over `turso::Rows`
