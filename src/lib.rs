@@ -202,68 +202,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_to_end_test_with_manual_mapping() -> TursoMapperResult<()> {
-        // Note that this is not testing anything in this crate, it's just here as a functional baseline and to compare to
-        // end_to_end_test_with_map_rows_and_try_from_row
-
-        let db = Builder::new_local(":memory:").build().await?;
-        let conn = db.connect()?;
-
-        conn.execute(
-            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
-            (),
-        )
-        .await?;
-
-        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
-            .await?;
-
-        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
-            .await?;
-
-        let mut rows = conn.query("SELECT id, name, value, image FROM customer;", ()).await?;
-
-        let mut customers = vec![];
-
-        while let Some(row) = rows.next().await? {
-            customers.push(CustomerWithManualTryFromRow {
-                id: *row
-                    .get_value(0)?
-                    .as_integer()
-                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
-                name: row
-                    .get_value(1)?
-                    .as_text()
-                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
-                    .clone(),
-                value: *row
-                    .get_value(2)?
-                    .as_real()
-                    .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
-                image: row
-                    .get_value(3)?
-                    .as_blob()
-                    .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
-                    .clone(),
-            });
-        }
-
-        assert_eq!(customers.len(), 2);
-
-        assert_eq!(customers[0].id, 1);
-        assert_eq!(customers[0].name, "Charlie");
-        assert_eq!(customers[0].value, 3.12);
-        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
-
-        assert_eq!(customers[1].id, 2);
-        assert_eq!(customers[1].name, "Sarah");
-        assert_eq!(customers[1].value, 0.99);
-        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn end_to_end_test_with_map_rows_and_try_from_row() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
