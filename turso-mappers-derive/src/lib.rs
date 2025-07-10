@@ -10,7 +10,7 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
     match ast.data {
         syn::Data::Struct(data) => {
             for field in data.fields {
-                if (field.ident).is_some() {
+                if field.ident.is_some() {
                     fields.push(field)
                 }
             }
@@ -51,6 +51,21 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                         .as_real()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
                 }
+            } else if type_path == "f64" {
+                quote! {
+                    #f_ident: *row
+                        .get_value(#idx)?
+                        .as_real()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
+                }
+            } else if type_path == "Vec<u8>" {
+                quote! {
+                    #f_ident: row
+                        .get_value(#idx)?
+                        .as_blob()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", stringify!(#f_ident))))?
+                        .clone()
+                }
             } else {
                 // For unsupported types, generate a compile-time error
                 let error_msg = format!("Unsupported type: {}", type_path);
@@ -77,7 +92,20 @@ fn get_type_path(ty: &Type) -> String {
     match ty {
         Type::Path(type_path) if !type_path.path.segments.is_empty() => {
             let segment = &type_path.path.segments[0];
-            segment.ident.to_string()
+            let ident = segment.ident.to_string();
+
+            // Handle generic types
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                if !args.args.is_empty() {
+                    if let Some(syn::GenericArgument::Type(Type::Path(inner_path))) = args.args.first() {
+                        if !inner_path.path.segments.is_empty() {
+                            let inner_type = inner_path.path.segments[0].ident.to_string();
+                            return format!("{}<{}>", ident, inner_type);
+                        }
+                    }
+                }
+            }
+            ident
         }
         _ => "unknown".to_string(),
     }

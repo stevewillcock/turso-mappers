@@ -9,9 +9,9 @@ the [documentation](https://docs.rs/crate/turso-mappers/latest) for more informa
 - Provides a `MapRows` trait with a `map_rows` method for easily mapping over `turso::Rows`
 - Defines a `TryFromRow` trait for `turso::Row`
 - Supports deriving the `TryFromRow` traits for structs via the turso-mappers-derive crate
-- Currently requires the columns in the SQL query to be in the same order as the struct fields
-- Currently maps by index in the TryFromRow implementation
-- Currently only supports i64 and String types in the derive macro
+- The derive macro currently requires the columns in the SQL query to be in the same order as the struct fields
+- The derive macro currently supports INTEGER (i64), TEXT (String), REAL (f64), and BLOB (Vec<u8>) types
+- The derive macro does not currently support NULL (Option) types
 
 ## Usage
 
@@ -33,7 +33,8 @@ use turso::Builder;
 pub struct Customer {
     pub id: i64,
     pub name: String,
-    pub value: f64
+    pub value: f64,
+    pub image: Vec<u8>
     // Note: Option<> is not currently supported by the derive macro
     // pub description: Option<String>,
 }
@@ -44,22 +45,28 @@ async fn main() -> TursoMapperResult<()> {
     let db = Builder::new_local(":memory:").build().await?;
     let conn = db.connect()?;
 
-    conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ()).await?;
-    conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
-    conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
+    conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+    conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ()).await?;
+    conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ()).await?;
 
-    let customers = conn.query("SELECT id, name, value FROM customer;", ()).await?.map_rows(Customer::try_from_row).await?;
+    let customers = conn
+        .query("SELECT id, name, value, image FROM customer;", ())
+        .await?
+        .map_rows(Customer::try_from_row)
+        .await?;
 
     assert_eq!(customers.len(), 2);
 
     assert_eq!(customers[0].id, 1);
     assert_eq!(customers[0].name, "Charlie");
     assert_eq!(customers[0].value, 3.12);
+    assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
 
     assert_eq!(customers[1].id, 2);
     assert_eq!(customers[1].name, "Sarah");
     assert_eq!(customers[1].value, 0.99);
-    
+    assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
+
     Ok(())
 
 }

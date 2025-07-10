@@ -86,6 +86,7 @@ mod tests {
         id: i64,
         name: String,
         value: f64,
+        image: Vec<u8>,
     }
 
     impl TryFromRow for CustomerWithManualTryFromRow {
@@ -104,6 +105,11 @@ mod tests {
                     .get_value(2)?
                     .as_real()
                     .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
+                image: row
+                    .get_value(3)?
+                    .as_blob()
+                    .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
+                    .clone(),
             })
         }
     }
@@ -113,6 +119,7 @@ mod tests {
         id: i64,
         name: String,
         value: f64,
+        image: Vec<u8>,
     }
 
     #[tokio::test]
@@ -120,11 +127,17 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
+        conn.execute(
+            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
+            (),
+        )
+        .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
+            .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
+            .await?;
 
-        let rows = conn.query("SELECT id, name, value FROM customer;", ()).await?;
+        let rows = conn.query("SELECT id, name, value, image FROM customer;", ()).await?;
 
         let customers = rows
             .map_rows(|row| {
@@ -142,6 +155,11 @@ mod tests {
                         .get_value(2)?
                         .as_real()
                         .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
+                    image: row
+                        .get_value(3)?
+                        .as_blob()
+                        .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
+                        .clone(),
                 })
             })
             .await?;
@@ -151,36 +169,56 @@ mod tests {
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[0].name, "Charlie");
         assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
 
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
         assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn manual_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie")), turso_core::Value::Float(3.12)].iter());
+        let row: Row = Row::from_iter(
+            [
+                turso_core::Value::Integer(1),
+                turso_core::Value::Text(Text::new("Charlie")),
+                turso_core::Value::Float(3.12),
+                turso_core::Value::Blob(vec![1, 2, 3]),
+            ]
+            .iter(),
+        );
 
         let customer = CustomerWithManualTryFromRow::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
         assert_eq!(customer.value, 3.12);
+        assert_eq!(customer.image, vec![1, 2, 3]);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn derive_macro_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie")), turso_core::Value::Float(3.12)].iter());
+        let row: Row = Row::from_iter(
+            [
+                turso_core::Value::Integer(1),
+                turso_core::Value::Text(Text::new("Charlie")),
+                turso_core::Value::Float(3.12),
+                turso_core::Value::Blob(vec![1, 2, 3]),
+            ]
+            .iter(),
+        );
 
         let customer = Customer::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
         assert_eq!(customer.value, 3.12);
+        assert_eq!(customer.image, vec![1, 2, 3]);
 
         Ok(())
     }
@@ -193,17 +231,22 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ())
+        conn.execute(
+            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
+            (),
+        )
+        .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
             .await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
+            .await?;
 
-        let mut rows = conn.query("SELECT id, name, value FROM customer;", ()).await?;
+        let mut rows = conn.query("SELECT id, name, value, image FROM customer;", ()).await?;
 
         let mut customers = vec![];
 
         while let Some(row) = rows.next().await? {
-            customers.push(Customer {
+            customers.push(CustomerWithManualTryFromRow {
                 id: *row
                     .get_value(0)?
                     .as_integer()
@@ -217,6 +260,11 @@ mod tests {
                     .get_value(2)?
                     .as_real()
                     .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
+                image: row
+                    .get_value(3)?
+                    .as_blob()
+                    .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
+                    .clone(),
             });
         }
 
@@ -225,10 +273,12 @@ mod tests {
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[0].name, "Charlie");
         assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
 
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
         assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
 
         Ok(())
     }
@@ -238,21 +288,33 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
-        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
+        conn.execute(
+            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
+            (),
+        )
+        .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
+            .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
+            .await?;
 
-        let customers = conn.query("SELECT id, name, value FROM customer;", ()).await?.map_rows(Customer::try_from_row).await?;
+        let customers = conn
+            .query("SELECT id, name, value, image FROM customer;", ())
+            .await?
+            .map_rows(Customer::try_from_row)
+            .await?;
 
         assert_eq!(customers.len(), 2);
 
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[0].name, "Charlie");
         assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
 
         assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
         assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
 
         Ok(())
     }
