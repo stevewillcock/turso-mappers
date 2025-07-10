@@ -51,13 +51,6 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                         .as_real()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
                 }
-            } else if type_path == "f64" {
-                quote! {
-                    #f_ident: *row
-                        .get_value(#idx)?
-                        .as_real()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
-                }
             } else if type_path == "Vec<u8>" {
                 quote! {
                     #f_ident: row
