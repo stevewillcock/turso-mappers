@@ -44,6 +44,13 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", stringify!(#f_ident))))?
                         .clone()
                 }
+            } else if type_path == "f64" {
+                quote! {
+                    #f_ident: *row
+                        .get_value(#idx)?
+                        .as_real()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
+                }
             } else {
                 // For unsupported types, generate a compile-time error
                 let error_msg = format!("Unsupported type: {}", type_path);

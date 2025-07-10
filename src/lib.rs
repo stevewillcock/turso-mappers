@@ -85,6 +85,7 @@ mod tests {
     struct CustomerWithManualTryFromRow {
         id: i64,
         name: String,
+        value: f64,
     }
 
     impl TryFromRow for CustomerWithManualTryFromRow {
@@ -99,6 +100,10 @@ mod tests {
                     .as_text()
                     .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
                     .clone(),
+                value: *row
+                    .get_value(2)?
+                    .as_real()
+                    .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
             })
         }
     }
@@ -107,6 +112,7 @@ mod tests {
     struct Customer {
         id: i64,
         name: String,
+        value: f64,
     }
 
     #[tokio::test]
@@ -114,11 +120,11 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
 
-        let rows = conn.query("SELECT * FROM customer;", ()).await?;
+        let rows = conn.query("SELECT id, name, value FROM customer;", ()).await?;
 
         let customers = rows
             .map_rows(|row| {
@@ -132,39 +138,49 @@ mod tests {
                         .as_text()
                         .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
                         .clone(),
+                    value: *row
+                        .get_value(2)?
+                        .as_real()
+                        .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
                 })
             })
             .await?;
 
         assert_eq!(customers.len(), 2);
+
         assert_eq!(customers[0].id, 1);
-        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+
+        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn manual_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie")), turso_core::Value::Float(3.12)].iter());
 
         let customer = CustomerWithManualTryFromRow::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.value, 3.12);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn derive_macro_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie"))].iter());
+        let row: Row = Row::from_iter([turso_core::Value::Integer(1), turso_core::Value::Text(Text::new("Charlie")), turso_core::Value::Float(3.12)].iter());
 
         let customer = Customer::try_from_row(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.value, 3.12);
 
         Ok(())
     }
@@ -177,11 +193,12 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ())
+            .await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
 
-        let mut rows = conn.query("SELECT id, name FROM customer;", ()).await?;
+        let mut rows = conn.query("SELECT id, name, value FROM customer;", ()).await?;
 
         let mut customers = vec![];
 
@@ -196,14 +213,22 @@ mod tests {
                     .as_text()
                     .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
                     .clone(),
+                value: *row
+                    .get_value(2)?
+                    .as_real()
+                    .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
             });
         }
 
         assert_eq!(customers.len(), 2);
+
         assert_eq!(customers[0].id, 1);
-        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+
+        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
 
         Ok(())
     }
@@ -213,18 +238,19 @@ mod tests {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
-        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL);", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Charlie');", ()).await?;
-        conn.execute("INSERT INTO customer (name) VALUES ('Sarah');", ()).await?;
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Charlie', 3.12);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value) VALUES ('Sarah', 0.99);", ()).await?;
 
-        let customers = conn
-            .query("SELECT id, name FROM customer;", ()).await?
-            .map_rows(Customer::try_from_row).await?;
+        let customers = conn.query("SELECT id, name, value FROM customer;", ()).await?.map_rows(Customer::try_from_row).await?;
 
         assert_eq!(customers.len(), 2);
+
         assert_eq!(customers[0].id, 1);
-        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+
+        assert_eq!(customers[1].id, 2);
         assert_eq!(customers[1].name, "Sarah");
 
         Ok(())
