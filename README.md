@@ -84,6 +84,6 @@ async fn main() -> TursoMapperResult<()> {
 ```
 
 ## TODO
-- Add support for more data types (currently only i64 and String are supported)
 - Add an option to use named mapping (by column name) instead of index-based mapping
 - Improve error messages and error handling
+- Reduce duplicated code in derive macro implementation
