@@ -28,8 +28,8 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
             // Check if the field is an Option<T>
             if let Some(inner_type) = get_option_inner_type(&f_type) {
                 // Handle Option<T> types
-                if inner_type == "i64" {
-                    return quote! {
+                return match inner_type.as_str() {
+                    "i64" => quote! {
                         #f_ident: match row.get_value(#idx) {
                             Ok(value) => match value.as_integer() {
                                 Some(val) => Some(*val),
@@ -37,9 +37,8 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                             },
                             Err(_) => None,
                         }
-                    };
-                } else if inner_type == "String" {
-                    return quote! {
+                    },
+                    "String" => quote! {
                         #f_ident: match row.get_value(#idx) {
                             Ok(value) => match value.as_text() {
                                 Some(val) => Some(val.clone()),
@@ -47,9 +46,8 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                             },
                             Err(_) => None,
                         }
-                    };
-                } else if inner_type == "f64" {
-                    return quote! {
+                    },
+                    "f64" => quote! {
                         #f_ident: match row.get_value(#idx) {
                             Ok(value) => match value.as_real() {
                                 Some(val) => Some(*val),
@@ -57,9 +55,8 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                             },
                             Err(_) => None,
                         }
-                    };
-                } else if inner_type == "Vec<u8>" {
-                    return quote! {
+                    },
+                    "Vec<u8>" => quote! {
                         #f_ident: match row.get_value(#idx) {
                             Ok(value) => match value.as_blob() {
                                 Some(val) => Some(val.clone()),
@@ -67,55 +64,54 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                             },
                             Err(_) => None,
                         }
-                    };
-                } else {
-                    // For unsupported Option<T> types, generate a compile-time error
-                    let error_msg = format!("Unsupported Option type: Option<{}>", inner_type);
-                    return quote! {
-                        #f_ident: compile_error!(#error_msg)
-                    };
-                }
+                    },
+                    _ => {
+                        // For unsupported Option<T> types, generate a compile-time error
+                        let error_msg = format!("Unsupported Option type: Option<{}>", inner_type);
+                        quote! {
+                            #f_ident: compile_error!(#error_msg)
+                        }
+                    }
+                };
             }
 
             // Generate code based on the manual implementation for non-Option types
             let type_path = get_type_path(&f_type);
 
             // Handle different types based on the field type
-            if type_path == "i64" {
-                quote! {
+            match type_path.as_str() {
+                "i64" => quote! {
                     #f_ident: *row
                         .get_value(#idx)?
                         .as_integer()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", stringify!(#f_ident))))?
-                }
-            } else if type_path == "String" {
-                quote! {
+                },
+                "String" => quote! {
                     #f_ident: row
                         .get_value(#idx)?
                         .as_text()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", stringify!(#f_ident))))?
                         .clone()
-                }
-            } else if type_path == "f64" {
-                quote! {
+                },
+                "f64" => quote! {
                     #f_ident: *row
                         .get_value(#idx)?
                         .as_real()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
-                }
-            } else if type_path == "Vec<u8>" {
-                quote! {
+                },
+                "Vec<u8>" => quote! {
                     #f_ident: row
                         .get_value(#idx)?
                         .as_blob()
                         .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", stringify!(#f_ident))))?
                         .clone()
-                }
-            } else {
-                // For unsupported types, generate a compile-time error
-                let error_msg = format!("Unsupported type: {}", type_path);
-                quote! {
-                    #f_ident: compile_error!(#error_msg)
+                },
+                _ => {
+                    // For unsupported types, generate a compile-time error
+                    let error_msg = format!("Unsupported type: {}", type_path);
+                    quote! {
+                        #f_ident: compile_error!(#error_msg)
+                    }
                 }
             }
         })
