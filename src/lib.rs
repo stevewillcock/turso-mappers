@@ -152,6 +152,9 @@ mod tests {
 
         let customer_names = rows
             .map_rows(|row| {
+
+
+
                 Ok(row
                     .get_value(1)?
                     .as_text()
