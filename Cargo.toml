@@ -8,7 +8,7 @@ repository = "https://github.com/stevewillcock/turso-binding-mappers"
 
 
 [dependencies]
-turso = { version = "0.1.2" }
+turso = { version = "0.1.5" }
 turso-mappers-derive = { version = "0.2.0", path = "turso-mappers-derive" }
 
 

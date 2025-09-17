@@ -1,6 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
-pub use turso_mappers_derive::TryFromRow;
+use std::collections::HashMap;
+use turso::Column;
+pub use turso_mappers_derive::TryFromRowByIndex;
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -69,15 +71,42 @@ impl MapRows for turso::Rows {
     }
 }
 
-pub trait TryFromRow {
+pub trait TryFromRowByIndex {
     fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
+    where
+        Self: Sized;
+}
+
+pub struct ColumnIndices {
+    column_names: HashMap<String, usize>,
+}
+
+impl ColumnIndices {
+    pub fn new(columns: Vec<Column>) -> Self {
+        let mut column_names = HashMap::new();
+        for (i, column) in columns.iter().enumerate() {
+            column_names.insert(column.name().to_string(), i);
+        }
+        ColumnIndices { column_names }
+    }
+
+    pub fn get_index(&self, column_name: &str) -> Result<usize, TursoMapperError> {
+        self.column_names
+            .get(column_name)
+            .cloned()
+            .ok_or_else(|| TursoMapperError::ColumnNotFound(column_name.to_string()))
+    }
+}
+
+pub trait TryFromRowByName {
+    fn try_from_row(row: turso::Row, column_indices: ColumnIndices) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TryFromRow, TursoMapperResult};
+    use super::{ColumnIndices, TryFromRowByIndex, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
     use turso_core::Value;
@@ -90,7 +119,7 @@ mod tests {
         image: Vec<u8>,
     }
 
-    impl TryFromRow for CustomerWithManualTryFromRow {
+    impl TryFromRowByIndex for CustomerWithManualTryFromRow {
         fn try_from_row(row: Row) -> TursoMapperResult<Self> {
             Ok(CustomerWithManualTryFromRow {
                 id: *row
@@ -115,7 +144,7 @@ mod tests {
         }
     }
 
-    #[derive(TryFromRow)]
+    #[derive(TryFromRowByIndex)]
     struct Customer {
         id: i64,
         name: String,
@@ -123,7 +152,7 @@ mod tests {
         image: Vec<u8>,
     }
 
-    #[derive(TryFromRow)]
+    #[derive(TryFromRowByIndex)]
     struct CustomerWithOptions {
         id: i64,
         name: String,
@@ -157,6 +186,47 @@ mod tests {
 
                 Ok(row
                     .get_value(1)?
+                    .as_text()
+                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                    .clone())
+            })
+            .await?;
+
+        assert_eq!(customer_names.len(), 2);
+
+        assert_eq!(customer_names[0], "Charlie");
+        assert_eq!(customer_names[1], "Sarah");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn can_get_values_using_map_with_names() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+
+        conn.execute(
+            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
+            (),
+        )
+        .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
+            .await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
+            .await?;
+
+        let mut statement = conn.prepare("SELECT id, name, value, image FROM customer;").await?;
+        let columns = statement.columns();
+        let column_indices = ColumnIndices::new(columns);
+
+        let rows = statement.query(()).await?;
+
+        let name_column_index = column_indices.get_index("name")?;
+
+        let customer_names = rows
+            .map_rows(|row| {
+                Ok(row
+                    .get_value(name_column_index)?
                     .as_text()
                     .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
                     .clone())
