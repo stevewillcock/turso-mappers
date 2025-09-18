@@ -78,14 +78,26 @@ pub trait TryFromRowByIndex: Send {
         Self: Sized;
 }
 
-pub trait QueryAs {
-    fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
+pub trait TryFromRow: Send {
+    fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
+    where
+        Self: Sized;
+}
+
+pub trait QueryAsByIndex {
+    fn query_as_by_index<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
     where
         T: TryFromRowByIndex + Send;
 }
 
-impl QueryAs for Connection {
-    async fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
+pub trait QueryAs {
+    fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
+    where
+        T: TryFromRow + Send;
+}
+
+impl QueryAsByIndex for Connection {
+    async fn query_as_by_index<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
     where
         T: TryFromRowByIndex + Send,
     {
@@ -125,7 +137,7 @@ pub trait TryFromRowByName {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnIndices, QueryAs, TryFromRowByIndex, TursoMapperResult};
+    use super::{ColumnIndices, QueryAsByIndex, TryFromRowByIndex, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
     use turso_core::Value;
@@ -343,7 +355,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_to_end_test_with_query_as() -> TursoMapperResult<()> {
+    async fn end_to_end_test_with_query_as_by_index() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
 
@@ -359,7 +371,7 @@ mod tests {
         conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
             .await?;
 
-        let customers = conn.query_as::<Customer>("SELECT id, name, value, image FROM customer;", ()).await?;
+        let customers = conn.query_as_by_index::<Customer>("SELECT id, name, value, image FROM customer;", ()).await?;
 
         assert_eq!(customers.len(), 2);
 
