@@ -24,14 +24,14 @@ This is a work in progress. Currently, the following functionality is implemente
 
 ```rust
 use turso_mappers::MapRows;
-use turso_mappers::TryFromRow;
+use turso_mappers::TryFromRowByIndex;
 use turso_mappers::TursoMapperResult;
 use turso_mappers::TursoMapperError;
 use turso_core::types::Text;
 use turso::Row;
 use turso::Builder;
 
-#[derive(TryFromRow)]
+#[derive(TryFromRowByIndex)]
 pub struct Customer {
     pub id: i64,
     pub name: String,
@@ -56,7 +56,7 @@ async fn main() -> TursoMapperResult<()> {
     let customers = conn
         .query("SELECT id, name, value, image, description FROM customer;", ())
         .await?
-        .map_rows(Customer::try_from_row)
+        .map_rows(Customer::try_from_row_by_index)
         .await?;
 
     // Verify we got both customers

@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Field, Ident, Type};
 
-fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
+fn impl_try_from_row_by_index(ast: DeriveInput) -> proc_macro2::TokenStream {
     let ident: Ident = ast.ident;
 
     let mut fields: Vec<Field> = vec![];
@@ -119,7 +119,7 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
 
     quote! {
         impl crate::TryFromRowByIndex for #ident {
-            fn try_from_row(row: turso::Row) -> crate::TursoMapperResult<Self> where Self: Sized {
+            fn try_from_row_by_index(row: turso::Row) -> crate::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })
@@ -177,5 +177,5 @@ fn get_option_inner_type(ty: &Type) -> Option<String> {
 #[proc_macro_derive(TryFromRowByIndex)]
 pub fn try_from_row_derive(input: TokenStream) -> TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
-    impl_try_from_row(ast).into()
+    impl_try_from_row_by_index(ast).into()
 }

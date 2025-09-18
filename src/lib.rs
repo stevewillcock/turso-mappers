@@ -72,14 +72,20 @@ impl MapRows for turso::Rows {
     }
 }
 
-pub trait TryFromRowByIndex: Send {
-    fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
+pub trait TryFromRow: Send {
+    fn try_from_row(row: turso::Row, column_indices: ColumnIndices) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
 
-pub trait TryFromRow: Send {
-    fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
+pub trait QueryAs {
+    fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
+    where
+        T: TryFromRow + Send;
+}
+
+pub trait TryFromRowByIndex: Send {
+    fn try_from_row_by_index(row: turso::Row) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
@@ -90,19 +96,13 @@ pub trait QueryAsByIndex {
         T: TryFromRowByIndex + Send;
 }
 
-pub trait QueryAs {
-    fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
-    where
-        T: TryFromRow + Send;
-}
-
 impl QueryAsByIndex for Connection {
     async fn query_as_by_index<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
     where
         T: TryFromRowByIndex + Send,
     {
         let rows = self.query(sql, params).await?;
-        rows.map_rows(T::try_from_row).await
+        rows.map_rows(T::try_from_row_by_index).await
     }
 }
 
@@ -151,7 +151,7 @@ mod tests {
     }
 
     impl TryFromRowByIndex for CustomerWithManualTryFromRow {
-        fn try_from_row(row: Row) -> TursoMapperResult<Self> {
+        fn try_from_row_by_index(row: Row) -> TursoMapperResult<Self> {
             Ok(CustomerWithManualTryFromRow {
                 id: *row
                     .get_value(0)?
@@ -284,7 +284,7 @@ mod tests {
             .iter(),
         );
 
-        let customer = CustomerWithManualTryFromRow::try_from_row(row)?;
+        let customer = CustomerWithManualTryFromRow::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -306,7 +306,7 @@ mod tests {
             .iter(),
         );
 
-        let customer = Customer::try_from_row(row)?;
+        let customer = Customer::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -336,7 +336,7 @@ mod tests {
         let customers = conn
             .query("SELECT id, name, value, image FROM customer;", ())
             .await?
-            .map_rows(Customer::try_from_row)
+            .map_rows(Customer::try_from_row_by_index)
             .await?;
 
         assert_eq!(customers.len(), 2);
@@ -403,7 +403,7 @@ mod tests {
             .iter(),
         );
 
-        let customer = CustomerWithOptions::try_from_row(row)?;
+        let customer = CustomerWithOptions::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -425,7 +425,7 @@ mod tests {
             .iter(),
         );
 
-        let customer = CustomerWithOptions::try_from_row(row)?;
+        let customer = CustomerWithOptions::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 2);
         assert_eq!(customer.name, "Sarah");
