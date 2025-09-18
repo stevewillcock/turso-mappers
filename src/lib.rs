@@ -1,7 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
 use std::collections::HashMap;
-use turso::Column;
+use std::future::Future;
+use turso::{Column, Connection, IntoParams};
 pub use turso_mappers_derive::TryFromRowByIndex;
 
 #[doc = include_str!("../README.md")]
@@ -71,10 +72,26 @@ impl MapRows for turso::Rows {
     }
 }
 
-pub trait TryFromRowByIndex {
+pub trait TryFromRowByIndex: Send {
     fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
     where
         Self: Sized;
+}
+
+pub trait QueryAs {
+    fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
+    where
+        T: TryFromRowByIndex + Send;
+}
+
+impl QueryAs for Connection {
+    async fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
+    where
+        T: TryFromRowByIndex + Send,
+    {
+        let rows = self.query(sql, params).await?;
+        rows.map_rows(T::try_from_row).await
+    }
 }
 
 pub struct ColumnIndices {
@@ -83,10 +100,12 @@ pub struct ColumnIndices {
 
 impl ColumnIndices {
     pub fn new(columns: Vec<Column>) -> Self {
-        let mut column_names = HashMap::new();
-        for (i, column) in columns.iter().enumerate() {
-            column_names.insert(column.name().to_string(), i);
-        }
+        let column_names = columns
+            .iter()
+            .enumerate()
+            .map(|(i, column)| (column.name().to_string(), i))
+            .collect::<HashMap<String, usize>>();
+
         ColumnIndices { column_names }
     }
 
@@ -106,7 +125,7 @@ pub trait TryFromRowByName {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnIndices, TryFromRowByIndex, TursoMapperResult};
+    use super::{ColumnIndices, QueryAs, TryFromRowByIndex, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
     use turso_core::Value;
@@ -210,17 +229,17 @@ mod tests {
             (),
         )
         .await?;
+
         conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
             .await?;
+
         conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
             .await?;
 
         let mut statement = conn.prepare("SELECT id, name, value, image FROM customer;").await?;
-        let columns = statement.columns();
-        let column_indices = ColumnIndices::new(columns);
-
         let rows = statement.query(()).await?;
 
+        let column_indices = ColumnIndices::new(statement.columns());
         let name_column_index = column_indices.get_index("name")?;
 
         let customer_names = rows
@@ -307,6 +326,40 @@ mod tests {
             .await?
             .map_rows(Customer::try_from_row)
             .await?;
+
+        assert_eq!(customers.len(), 2);
+
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
+
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn end_to_end_test_with_query_as() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+
+        conn.execute(
+            "CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);",
+            (),
+        )
+        .await?;
+
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ())
+            .await?;
+
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ())
+            .await?;
+
+        let customers = conn.query_as::<Customer>("SELECT id, name, value, image FROM customer;", ()).await?;
 
         assert_eq!(customers.len(), 2);
 
