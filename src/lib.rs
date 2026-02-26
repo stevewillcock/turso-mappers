@@ -171,7 +171,7 @@ impl ColumnIndices {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnIndices, QueryAsByIndex, QueryAsByName, TryFromRowByIndex, TryFromRowByName, TursoMapperResult};
+    use super::{ColumnIndices, QueryAs, QueryAsByIndex, QueryAsByName, TryFromRow, TryFromRowByIndex, TryFromRowByName, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
 
@@ -223,6 +223,72 @@ mod tests {
         optional_note: Option<String>,
         optional_data: Option<Vec<u8>>,
         optional_count: Option<i64>,
+    }
+
+    // Manual TryFromRow impl — positional access matching SELECT id, name, value, image
+    struct CustomerManual {
+        id: i64,
+        name: String,
+        value: f64,
+        image: Vec<u8>,
+    }
+
+    impl TryFromRow for CustomerManual {
+        fn try_from_row(row: Row) -> TursoMapperResult<Self> {
+            Ok(CustomerManual {
+                id: *row
+                    .get_value(0)?
+                    .as_integer()
+                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+                name: row
+                    .get_value(1)?
+                    .as_text()
+                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                    .clone(),
+                value: *row
+                    .get_value(2)?
+                    .as_real()
+                    .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
+                image: row
+                    .get_value(3)?
+                    .as_blob()
+                    .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
+                    .clone(),
+            })
+        }
+    }
+
+    // Manual TryFromRow impl — positional access matching SELECT image, value, name, id
+    struct CustomerManualReordered {
+        id: i64,
+        name: String,
+        value: f64,
+        image: Vec<u8>,
+    }
+
+    impl TryFromRow for CustomerManualReordered {
+        fn try_from_row(row: Row) -> TursoMapperResult<Self> {
+            Ok(CustomerManualReordered {
+                image: row
+                    .get_value(0)?
+                    .as_blob()
+                    .ok_or_else(|| TursoMapperError::ConversionError("image is not a blob".to_string()))?
+                    .clone(),
+                value: *row
+                    .get_value(1)?
+                    .as_real()
+                    .ok_or_else(|| TursoMapperError::ConversionError("value is not a real".to_string()))?,
+                name: row
+                    .get_value(2)?
+                    .as_text()
+                    .ok_or_else(|| TursoMapperError::ConversionError("name is not a string".to_string()))?
+                    .clone(),
+                id: *row
+                    .get_value(3)?
+                    .as_integer()
+                    .ok_or_else(|| TursoMapperError::ConversionError("id is not an integer".to_string()))?,
+            })
+        }
     }
 
     #[tokio::test]
@@ -447,6 +513,68 @@ mod tests {
         Ok(())
     }
 
+    // --- TryFromRow (manual, simple) tests ---
+
+    #[tokio::test]
+    async fn try_from_row_manual_single_row() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        let mut rows = conn.query("SELECT id, name, value, image FROM t;", ()).await?;
+        let row = rows.next().await?.unwrap();
+        let customer = CustomerManual::try_from_row(row)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.value, 3.12);
+        assert_eq!(customer.image, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_as_end_to_end() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ()).await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ()).await?;
+
+        let customers = conn.query_as::<CustomerManual>("SELECT id, name, value, image FROM customer;", ()).await?;
+
+        assert_eq!(customers.len(), 2);
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_as_column_reorder() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        // Manual impl maps indices to match reordered SELECT
+        let customers = conn.query_as::<CustomerManualReordered>("SELECT image, value, name, id FROM t;", ()).await?;
+
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
     // --- By-name mapping tests ---
 
     #[derive(TryFromRowByName)]
@@ -525,6 +653,28 @@ mod tests {
         assert_eq!(customers[0].name, "Charlie");
         assert_eq!(customers[0].value, 3.12);
         assert_eq!(customers[0].image, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn try_from_row_by_name_column_reorder() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        // SELECT columns in different order — resolved automatically by name
+        let mut rows = conn.query("SELECT image, value, name, id FROM t;", ()).await?;
+        let column_indices = ColumnIndices::new(rows.columns());
+        let indices = CustomerByName::resolve_indices(&column_indices)?;
+        let row = rows.next().await?.unwrap();
+        let customer = CustomerByName::try_from_row_by_name(row, &indices)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.value, 3.12);
+        assert_eq!(customer.image, vec![1, 2, 3, 0]);
 
         Ok(())
     }
