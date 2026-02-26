@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use turso::{Column, Connection, IntoParams};
-pub use turso_mappers_derive::{TryFromRow, TryFromRowByIndex};
+pub use turso_mappers_derive::{TryFromRowByIndex, TryFromRowByName};
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -73,9 +73,7 @@ impl MapRows for turso::Rows {
 }
 
 pub trait TryFromRow: Send {
-    type Indices;
-    fn resolve_indices(column_indices: &ColumnIndices) -> TursoMapperResult<Self::Indices>;
-    fn try_from_row(row: turso::Row, indices: &Self::Indices) -> TursoMapperResult<Self>
+    fn try_from_row(row: turso::Row) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
@@ -91,12 +89,36 @@ impl QueryAs for Connection {
     where
         T: TryFromRow + Send,
     {
+        let rows = self.query(sql, params).await?;
+        rows.map_rows(T::try_from_row).await
+    }
+}
+
+pub trait TryFromRowByName: Send {
+    type Indices;
+    fn resolve_indices(column_indices: &ColumnIndices) -> TursoMapperResult<Self::Indices>;
+    fn try_from_row_by_name(row: turso::Row, indices: &Self::Indices) -> TursoMapperResult<Self>
+    where
+        Self: Sized;
+}
+
+pub trait QueryAsByName {
+    fn query_as_by_name<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
+    where
+        T: TryFromRowByName + Send;
+}
+
+impl QueryAsByName for Connection {
+    async fn query_as_by_name<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
+    where
+        T: TryFromRowByName + Send,
+    {
         let mut rows = self.query(sql, params).await?;
         let column_indices = ColumnIndices::new(rows.columns());
         let indices = T::resolve_indices(&column_indices)?;
         let mut results = vec![];
         while let Some(row) = rows.next().await? {
-            results.push(T::try_from_row(row, &indices)?);
+            results.push(T::try_from_row_by_name(row, &indices)?);
         }
         Ok(results)
     }
@@ -149,7 +171,7 @@ impl ColumnIndices {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnIndices, QueryAs, QueryAsByIndex, TryFromRow, TryFromRowByIndex, TursoMapperResult};
+    use super::{ColumnIndices, QueryAsByIndex, QueryAsByName, TryFromRowByIndex, TryFromRowByName, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
 
@@ -427,7 +449,7 @@ mod tests {
 
     // --- By-name mapping tests ---
 
-    #[derive(TryFromRow)]
+    #[derive(TryFromRowByName)]
     struct CustomerByName {
         id: i64,
         name: String,
@@ -435,7 +457,7 @@ mod tests {
         image: Vec<u8>,
     }
 
-    #[derive(TryFromRow)]
+    #[derive(TryFromRowByName)]
     struct CustomerByNameWithOptions {
         id: i64,
         name: String,
@@ -446,7 +468,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn derived_try_from_row_impl() -> TursoMapperResult<()> {
+    async fn derived_try_from_row_by_name_impl() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
         conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
@@ -456,7 +478,7 @@ mod tests {
         let column_indices = ColumnIndices::new(rows.columns());
         let indices = CustomerByName::resolve_indices(&column_indices)?;
         let row = rows.next().await?.unwrap();
-        let customer = CustomerByName::try_from_row(row, &indices)?;
+        let customer = CustomerByName::try_from_row_by_name(row, &indices)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
@@ -467,14 +489,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_to_end_test_with_query_as() -> TursoMapperResult<()> {
+    async fn end_to_end_test_with_query_as_by_name() -> TursoMapperResult<()> {
         let db = Builder::new_local(":memory:").build().await?;
         let conn = db.connect()?;
         conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
         conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ()).await?;
         conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ()).await?;
 
-        let customers = conn.query_as::<CustomerByName>("SELECT id, name, value, image FROM customer;", ()).await?;
+        let customers = conn.query_as_by_name::<CustomerByName>("SELECT id, name, value, image FROM customer;", ()).await?;
 
         assert_eq!(customers.len(), 2);
         assert_eq!(customers[0].id, 1);
@@ -497,7 +519,7 @@ mod tests {
         conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
 
         // SELECT columns in different order than struct fields
-        let customers = conn.query_as::<CustomerByName>("SELECT image, value, name, id FROM t;", ()).await?;
+        let customers = conn.query_as_by_name::<CustomerByName>("SELECT image, value, name, id FROM t;", ()).await?;
 
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[0].name, "Charlie");
@@ -518,7 +540,7 @@ mod tests {
         conn.execute("INSERT INTO t (name, optional_value, optional_data) VALUES ('Charlie', 3.12, x'010203');", ()).await?;
         conn.execute("INSERT INTO t (name, optional_value, optional_note, optional_data, optional_count) VALUES ('Sarah', 0.99, 'Some note', x'09080706', 42);", ()).await?;
 
-        let customers = conn.query_as::<CustomerByNameWithOptions>("SELECT id, name, optional_value, optional_note, optional_data, optional_count FROM t;", ()).await?;
+        let customers = conn.query_as_by_name::<CustomerByNameWithOptions>("SELECT id, name, optional_value, optional_note, optional_data, optional_count FROM t;", ()).await?;
 
         assert_eq!(customers[0].id, 1);
         assert_eq!(customers[0].name, "Charlie");
@@ -545,7 +567,7 @@ mod tests {
         conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
 
         // Omit 'image' column -- should fail with ColumnNotFound
-        let result = conn.query_as::<CustomerByName>("SELECT id, name, value FROM t;", ()).await;
+        let result = conn.query_as_by_name::<CustomerByName>("SELECT id, name, value FROM t;", ()).await;
         assert!(result.is_err());
 
         Ok(())

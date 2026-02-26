@@ -174,7 +174,7 @@ fn get_option_inner_type(ty: &Type) -> Option<String> {
     }
 }
 
-fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
+fn impl_try_from_row_by_name(ast: DeriveInput) -> proc_macro2::TokenStream {
     let ident: Ident = ast.ident;
 
     let mut fields: Vec<Field> = vec![];
@@ -187,7 +187,7 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                 }
             }
         }
-        _ => panic!("turso_mappers::TryFromRow only supports structs"),
+        _ => panic!("turso_mappers::TryFromRowByName only supports structs"),
     };
 
     let field_count = fields.len();
@@ -295,14 +295,14 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
         .collect::<Vec<_>>();
 
     quote! {
-        impl crate::TryFromRow for #ident {
+        impl crate::TryFromRowByName for #ident {
             type Indices = [usize; #field_count];
 
             fn resolve_indices(column_indices: &crate::ColumnIndices) -> crate::TursoMapperResult<Self::Indices> {
                 Ok([#(#resolve_lookups,)*])
             }
 
-            fn try_from_row(row: turso::Row, indices: &Self::Indices) -> crate::TursoMapperResult<Self> where Self: Sized {
+            fn try_from_row_by_name(row: turso::Row, indices: &Self::Indices) -> crate::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })
@@ -317,8 +317,8 @@ pub fn try_from_row_by_index_derive(input: TokenStream) -> TokenStream {
     impl_try_from_row_by_index(ast).into()
 }
 
-#[proc_macro_derive(TryFromRow)]
-pub fn try_from_row_derive(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(TryFromRowByName)]
+pub fn try_from_row_by_name_derive(input: TokenStream) -> TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
-    impl_try_from_row(ast).into()
+    impl_try_from_row_by_name(ast).into()
 }
