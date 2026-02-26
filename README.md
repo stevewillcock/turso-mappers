@@ -27,8 +27,6 @@ use turso_mappers::MapRows;
 use turso_mappers::TryFromRowByIndex;
 use turso_mappers::TursoMapperResult;
 use turso_mappers::TursoMapperError;
-use turso_core::types::Text;
-use turso::Row;
 use turso::Builder;
 
 #[derive(TryFromRowByIndex)]

@@ -140,8 +140,6 @@ mod tests {
     use super::{ColumnIndices, QueryAsByIndex, TryFromRowByIndex, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
-    use turso_core::Value;
-    use turso_core::types::Text;
 
     struct CustomerWithManualTryFromRow {
         id: i64,
@@ -273,45 +271,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter(
-            [
-                Value::Integer(1),
-                Value::Text(Text::new("Charlie")),
-                Value::Float(3.12),
-                Value::Blob(vec![1, 2, 3]),
-            ]
-            .iter(),
-        );
+    async fn manual_try_from_row_by_index_impl() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
 
+        let mut rows = conn.query("SELECT id, name, value, image FROM t;", ()).await?;
+        let row = rows.next().await?.unwrap();
         let customer = CustomerWithManualTryFromRow::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
         assert_eq!(customer.value, 3.12);
-        assert_eq!(customer.image, vec![1, 2, 3]);
+        assert_eq!(customer.image, vec![1, 2, 3, 0]);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn derive_macro_try_from_row_impl_works() -> TursoMapperResult<()> {
-        let row: Row = Row::from_iter(
-            [
-                Value::Integer(1),
-                Value::Text(Text::new("Charlie")),
-                Value::Float(3.12),
-                Value::Blob(vec![1, 2, 3]),
-            ]
-            .iter(),
-        );
+    async fn derived_try_from_row_by_index_impl() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
 
+        let mut rows = conn.query("SELECT id, name, value, image FROM t;", ()).await?;
+        let row = rows.next().await?.unwrap();
         let customer = Customer::try_from_row_by_index(row)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
         assert_eq!(customer.value, 3.12);
-        assert_eq!(customer.image, vec![1, 2, 3]);
+        assert_eq!(customer.image, vec![1, 2, 3, 0]);
 
         Ok(())
     }
@@ -390,49 +382,33 @@ mod tests {
 
     #[tokio::test]
     async fn option_types_support_works() -> TursoMapperResult<()> {
-        // Test with a manually created Row with some NULL values
-        let row: Row = Row::from_iter(
-            [
-                Value::Integer(1),
-                Value::Text(Text::new("Charlie")),
-                Value::Float(3.12),
-                Value::Null,
-                Value::Blob(vec![1, 2, 3]),
-                Value::Null,
-            ]
-            .iter(),
-        );
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, optional_value REAL, optional_note TEXT, optional_data BLOB, optional_count INTEGER);",
+            (),
+        ).await?;
 
-        let customer = CustomerWithOptions::try_from_row_by_index(row)?;
+        // Row with some NULLs
+        conn.execute("INSERT INTO t (name, optional_value, optional_data) VALUES ('Charlie', 3.12, x'010203');", ()).await?;
+        // Row with all non-NULL
+        conn.execute("INSERT INTO t (name, optional_value, optional_note, optional_data, optional_count) VALUES ('Sarah', 0.99, 'Some note', x'09080706', 42);", ()).await?;
 
-        assert_eq!(customer.id, 1);
-        assert_eq!(customer.name, "Charlie");
-        assert_eq!(customer.optional_value, Some(3.12));
-        assert_eq!(customer.optional_note, None);
-        assert_eq!(customer.optional_data, Some(vec![1, 2, 3]));
-        assert_eq!(customer.optional_count, None);
+        let customers = conn.query_as_by_index::<CustomerWithOptions>("SELECT id, name, optional_value, optional_note, optional_data, optional_count FROM t;", ()).await?;
 
-        // Test with a Row with all non-NULL values
-        let row: Row = Row::from_iter(
-            [
-                Value::Integer(2),
-                Value::Text(Text::new("Sarah")),
-                Value::Float(0.99),
-                Value::Text(Text::new("Some note")),
-                Value::Blob(vec![9, 8, 7, 6]),
-                Value::Integer(42),
-            ]
-            .iter(),
-        );
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].optional_value, Some(3.12));
+        assert_eq!(customers[0].optional_note, None);
+        assert_eq!(customers[0].optional_data, Some(vec![1, 2, 3]));
+        assert_eq!(customers[0].optional_count, None);
 
-        let customer = CustomerWithOptions::try_from_row_by_index(row)?;
-
-        assert_eq!(customer.id, 2);
-        assert_eq!(customer.name, "Sarah");
-        assert_eq!(customer.optional_value, Some(0.99));
-        assert_eq!(customer.optional_note, Some("Some note".to_string()));
-        assert_eq!(customer.optional_data, Some(vec![9, 8, 7, 6]));
-        assert_eq!(customer.optional_count, Some(42));
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].optional_value, Some(0.99));
+        assert_eq!(customers[1].optional_note, Some("Some note".to_string()));
+        assert_eq!(customers[1].optional_data, Some(vec![9, 8, 7, 6]));
+        assert_eq!(customers[1].optional_count, Some(42));
 
         Ok(())
     }

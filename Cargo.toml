@@ -8,11 +8,10 @@ repository = "https://github.com/stevewillcock/turso-binding-mappers"
 
 
 [dependencies]
-turso = { version = "0.1.5" }
+turso = { git = "ssh://git@github.com/tursodatabase/turso.git", package = "turso", rev = "70e5a9a" }
 turso-mappers-derive = { version = "0.2.0", path = "turso-mappers-derive" }
 
 
 
 [dev-dependencies]
 tokio = { version = "1.46.1", features = ["rt", "macros", "test-util", "rt-multi-thread"] }
-turso_core = "0.1.2"
