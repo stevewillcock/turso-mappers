@@ -190,61 +190,59 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
         _ => panic!("turso_mappers::TryFromRow only supports structs"),
     };
 
+    let field_count = fields.len();
+
+    let resolve_lookups: Vec<proc_macro2::TokenStream> = fields
+        .iter()
+        .map(|field| {
+            let f_name = field.ident.as_ref().unwrap().to_string();
+            quote! { column_indices.get_index(#f_name)? }
+        })
+        .collect();
+
     let field_mappers: Vec<proc_macro2::TokenStream> = fields
         .into_iter()
-        .map(|field| {
+        .enumerate()
+        .map(|(idx, field)| {
             let f_ident = field.ident.unwrap();
-            let f_name = f_ident.to_string();
             let f_type = field.ty.clone();
 
             if let Some(inner_type) = get_option_inner_type(&f_type) {
                 return match inner_type.as_str() {
                     "i64" => quote! {
-                        #f_ident: {
-                            let idx = column_indices.get_index(#f_name)?;
-                            match row.get_value(idx) {
-                                Ok(value) => match value.as_integer() {
-                                    Some(val) => Some(*val),
-                                    None => None,
-                                },
-                                Err(_) => None,
-                            }
+                        #f_ident: match row.get_value(indices[#idx]) {
+                            Ok(value) => match value.as_integer() {
+                                Some(val) => Some(*val),
+                                None => None,
+                            },
+                            Err(_) => None,
                         }
                     },
                     "String" => quote! {
-                        #f_ident: {
-                            let idx = column_indices.get_index(#f_name)?;
-                            match row.get_value(idx) {
-                                Ok(value) => match value.as_text() {
-                                    Some(val) => Some(val.clone()),
-                                    None => None,
-                                },
-                                Err(_) => None,
-                            }
+                        #f_ident: match row.get_value(indices[#idx]) {
+                            Ok(value) => match value.as_text() {
+                                Some(val) => Some(val.clone()),
+                                None => None,
+                            },
+                            Err(_) => None,
                         }
                     },
                     "f64" => quote! {
-                        #f_ident: {
-                            let idx = column_indices.get_index(#f_name)?;
-                            match row.get_value(idx) {
-                                Ok(value) => match value.as_real() {
-                                    Some(val) => Some(*val),
-                                    None => None,
-                                },
-                                Err(_) => None,
-                            }
+                        #f_ident: match row.get_value(indices[#idx]) {
+                            Ok(value) => match value.as_real() {
+                                Some(val) => Some(*val),
+                                None => None,
+                            },
+                            Err(_) => None,
                         }
                     },
                     "Vec<u8>" => quote! {
-                        #f_ident: {
-                            let idx = column_indices.get_index(#f_name)?;
-                            match row.get_value(idx) {
-                                Ok(value) => match value.as_blob() {
-                                    Some(val) => Some(val.clone()),
-                                    None => None,
-                                },
-                                Err(_) => None,
-                            }
+                        #f_ident: match row.get_value(indices[#idx]) {
+                            Ok(value) => match value.as_blob() {
+                                Some(val) => Some(val.clone()),
+                                None => None,
+                            },
+                            Err(_) => None,
                         }
                     },
                     _ => {
@@ -256,42 +254,35 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
                 };
             }
 
+            let f_name = f_ident.to_string();
             let type_path = get_type_path(&f_type);
 
             match type_path.as_str() {
                 "i64" => quote! {
-                    #f_ident: {
-                        let idx = column_indices.get_index(#f_name)?;
-                        *row.get_value(idx)?
-                            .as_integer()
-                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", #f_name)))?
-                    }
+                    #f_ident: *row
+                        .get_value(indices[#idx])?
+                        .as_integer()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", #f_name)))?
                 },
                 "String" => quote! {
-                    #f_ident: {
-                        let idx = column_indices.get_index(#f_name)?;
-                        row.get_value(idx)?
-                            .as_text()
-                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", #f_name)))?
-                            .clone()
-                    }
+                    #f_ident: row
+                        .get_value(indices[#idx])?
+                        .as_text()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", #f_name)))?
+                        .clone()
                 },
                 "f64" => quote! {
-                    #f_ident: {
-                        let idx = column_indices.get_index(#f_name)?;
-                        *row.get_value(idx)?
-                            .as_real()
-                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", #f_name)))?
-                    }
+                    #f_ident: *row
+                        .get_value(indices[#idx])?
+                        .as_real()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", #f_name)))?
                 },
                 "Vec<u8>" => quote! {
-                    #f_ident: {
-                        let idx = column_indices.get_index(#f_name)?;
-                        row.get_value(idx)?
-                            .as_blob()
-                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", #f_name)))?
-                            .clone()
-                    }
+                    #f_ident: row
+                        .get_value(indices[#idx])?
+                        .as_blob()
+                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", #f_name)))?
+                        .clone()
                 },
                 _ => {
                     let error_msg = format!("Unsupported type: {}", type_path);
@@ -305,7 +296,13 @@ fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
 
     quote! {
         impl crate::TryFromRow for #ident {
-            fn try_from_row(row: turso::Row, column_indices: &crate::ColumnIndices) -> crate::TursoMapperResult<Self> where Self: Sized {
+            type Indices = [usize; #field_count];
+
+            fn resolve_indices(column_indices: &crate::ColumnIndices) -> crate::TursoMapperResult<Self::Indices> {
+                Ok([#(#resolve_lookups,)*])
+            }
+
+            fn try_from_row(row: turso::Row, indices: &Self::Indices) -> crate::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })

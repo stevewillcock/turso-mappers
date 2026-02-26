@@ -73,7 +73,9 @@ impl MapRows for turso::Rows {
 }
 
 pub trait TryFromRow: Send {
-    fn try_from_row(row: turso::Row, column_indices: &ColumnIndices) -> TursoMapperResult<Self>
+    type Indices;
+    fn resolve_indices(column_indices: &ColumnIndices) -> TursoMapperResult<Self::Indices>;
+    fn try_from_row(row: turso::Row, indices: &Self::Indices) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
@@ -91,9 +93,10 @@ impl QueryAs for Connection {
     {
         let mut rows = self.query(sql, params).await?;
         let column_indices = ColumnIndices::new(rows.columns());
+        let indices = T::resolve_indices(&column_indices)?;
         let mut results = vec![];
         while let Some(row) = rows.next().await? {
-            results.push(T::try_from_row(row, &column_indices)?);
+            results.push(T::try_from_row(row, &indices)?);
         }
         Ok(results)
     }
@@ -451,8 +454,9 @@ mod tests {
 
         let mut rows = conn.query("SELECT id, name, value, image FROM t;", ()).await?;
         let column_indices = ColumnIndices::new(rows.columns());
+        let indices = CustomerByName::resolve_indices(&column_indices)?;
         let row = rows.next().await?.unwrap();
-        let customer = CustomerByName::try_from_row(row, &column_indices)?;
+        let customer = CustomerByName::try_from_row(row, &indices)?;
 
         assert_eq!(customer.id, 1);
         assert_eq!(customer.name, "Charlie");
