@@ -174,8 +174,154 @@ fn get_option_inner_type(ty: &Type) -> Option<String> {
     }
 }
 
+fn impl_try_from_row(ast: DeriveInput) -> proc_macro2::TokenStream {
+    let ident: Ident = ast.ident;
+
+    let mut fields: Vec<Field> = vec![];
+
+    match ast.data {
+        syn::Data::Struct(data) => {
+            for field in data.fields {
+                if field.ident.is_some() {
+                    fields.push(field)
+                }
+            }
+        }
+        _ => panic!("turso_mappers::TryFromRow only supports structs"),
+    };
+
+    let field_mappers: Vec<proc_macro2::TokenStream> = fields
+        .into_iter()
+        .map(|field| {
+            let f_ident = field.ident.unwrap();
+            let f_name = f_ident.to_string();
+            let f_type = field.ty.clone();
+
+            if let Some(inner_type) = get_option_inner_type(&f_type) {
+                return match inner_type.as_str() {
+                    "i64" => quote! {
+                        #f_ident: {
+                            let idx = column_indices.get_index(#f_name)?;
+                            match row.get_value(idx) {
+                                Ok(value) => match value.as_integer() {
+                                    Some(val) => Some(*val),
+                                    None => None,
+                                },
+                                Err(_) => None,
+                            }
+                        }
+                    },
+                    "String" => quote! {
+                        #f_ident: {
+                            let idx = column_indices.get_index(#f_name)?;
+                            match row.get_value(idx) {
+                                Ok(value) => match value.as_text() {
+                                    Some(val) => Some(val.clone()),
+                                    None => None,
+                                },
+                                Err(_) => None,
+                            }
+                        }
+                    },
+                    "f64" => quote! {
+                        #f_ident: {
+                            let idx = column_indices.get_index(#f_name)?;
+                            match row.get_value(idx) {
+                                Ok(value) => match value.as_real() {
+                                    Some(val) => Some(*val),
+                                    None => None,
+                                },
+                                Err(_) => None,
+                            }
+                        }
+                    },
+                    "Vec<u8>" => quote! {
+                        #f_ident: {
+                            let idx = column_indices.get_index(#f_name)?;
+                            match row.get_value(idx) {
+                                Ok(value) => match value.as_blob() {
+                                    Some(val) => Some(val.clone()),
+                                    None => None,
+                                },
+                                Err(_) => None,
+                            }
+                        }
+                    },
+                    _ => {
+                        let error_msg = format!("Unsupported Option type: Option<{}>", inner_type);
+                        quote! {
+                            #f_ident: compile_error!(#error_msg)
+                        }
+                    }
+                };
+            }
+
+            let type_path = get_type_path(&f_type);
+
+            match type_path.as_str() {
+                "i64" => quote! {
+                    #f_ident: {
+                        let idx = column_indices.get_index(#f_name)?;
+                        *row.get_value(idx)?
+                            .as_integer()
+                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", #f_name)))?
+                    }
+                },
+                "String" => quote! {
+                    #f_ident: {
+                        let idx = column_indices.get_index(#f_name)?;
+                        row.get_value(idx)?
+                            .as_text()
+                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", #f_name)))?
+                            .clone()
+                    }
+                },
+                "f64" => quote! {
+                    #f_ident: {
+                        let idx = column_indices.get_index(#f_name)?;
+                        *row.get_value(idx)?
+                            .as_real()
+                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", #f_name)))?
+                    }
+                },
+                "Vec<u8>" => quote! {
+                    #f_ident: {
+                        let idx = column_indices.get_index(#f_name)?;
+                        row.get_value(idx)?
+                            .as_blob()
+                            .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", #f_name)))?
+                            .clone()
+                    }
+                },
+                _ => {
+                    let error_msg = format!("Unsupported type: {}", type_path);
+                    quote! {
+                        #f_ident: compile_error!(#error_msg)
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    quote! {
+        impl crate::TryFromRow for #ident {
+            fn try_from_row(row: turso::Row, column_indices: &crate::ColumnIndices) -> crate::TursoMapperResult<Self> where Self: Sized {
+                Ok(Self {
+                    #(#field_mappers,)*
+                })
+            }
+        }
+    }
+}
+
 #[proc_macro_derive(TryFromRowByIndex)]
-pub fn try_from_row_derive(input: TokenStream) -> TokenStream {
+pub fn try_from_row_by_index_derive(input: TokenStream) -> TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
     impl_try_from_row_by_index(ast).into()
+}
+
+#[proc_macro_derive(TryFromRow)]
+pub fn try_from_row_derive(input: TokenStream) -> TokenStream {
+    let ast: DeriveInput = syn::parse(input).unwrap();
+    impl_try_from_row(ast).into()
 }

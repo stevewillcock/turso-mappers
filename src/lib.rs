@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use turso::{Column, Connection, IntoParams};
-pub use turso_mappers_derive::TryFromRowByIndex;
+pub use turso_mappers_derive::{TryFromRow, TryFromRowByIndex};
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -73,7 +73,7 @@ impl MapRows for turso::Rows {
 }
 
 pub trait TryFromRow: Send {
-    fn try_from_row(row: turso::Row, column_indices: ColumnIndices) -> TursoMapperResult<Self>
+    fn try_from_row(row: turso::Row, column_indices: &ColumnIndices) -> TursoMapperResult<Self>
     where
         Self: Sized;
 }
@@ -82,6 +82,21 @@ pub trait QueryAs {
     fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> impl Future<Output = TursoMapperResult<Vec<T>>>
     where
         T: TryFromRow + Send;
+}
+
+impl QueryAs for Connection {
+    async fn query_as<T>(&self, sql: &str, params: impl IntoParams) -> TursoMapperResult<Vec<T>>
+    where
+        T: TryFromRow + Send,
+    {
+        let mut rows = self.query(sql, params).await?;
+        let column_indices = ColumnIndices::new(rows.columns());
+        let mut results = vec![];
+        while let Some(row) = rows.next().await? {
+            results.push(T::try_from_row(row, &column_indices)?);
+        }
+        Ok(results)
+    }
 }
 
 pub trait TryFromRowByIndex: Send {
@@ -129,15 +144,9 @@ impl ColumnIndices {
     }
 }
 
-pub trait TryFromRowByName {
-    fn try_from_row(row: turso::Row, column_indices: ColumnIndices) -> TursoMapperResult<Self>
-    where
-        Self: Sized;
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ColumnIndices, QueryAsByIndex, TryFromRowByIndex, TursoMapperResult};
+    use super::{ColumnIndices, QueryAs, QueryAsByIndex, TryFromRow, TryFromRowByIndex, TursoMapperResult};
     use crate::{MapRows, TursoMapperError};
     use turso::{Builder, Row};
 
@@ -409,6 +418,131 @@ mod tests {
         assert_eq!(customers[1].optional_note, Some("Some note".to_string()));
         assert_eq!(customers[1].optional_data, Some(vec![9, 8, 7, 6]));
         assert_eq!(customers[1].optional_count, Some(42));
+
+        Ok(())
+    }
+
+    // --- By-name mapping tests ---
+
+    #[derive(TryFromRow)]
+    struct CustomerByName {
+        id: i64,
+        name: String,
+        value: f64,
+        image: Vec<u8>,
+    }
+
+    #[derive(TryFromRow)]
+    struct CustomerByNameWithOptions {
+        id: i64,
+        name: String,
+        optional_value: Option<f64>,
+        optional_note: Option<String>,
+        optional_data: Option<Vec<u8>>,
+        optional_count: Option<i64>,
+    }
+
+    #[tokio::test]
+    async fn derived_try_from_row_impl() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        let mut rows = conn.query("SELECT id, name, value, image FROM t;", ()).await?;
+        let column_indices = ColumnIndices::new(rows.columns());
+        let row = rows.next().await?.unwrap();
+        let customer = CustomerByName::try_from_row(row, &column_indices)?;
+
+        assert_eq!(customer.id, 1);
+        assert_eq!(customer.name, "Charlie");
+        assert_eq!(customer.value, 3.12);
+        assert_eq!(customer.image, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn end_to_end_test_with_query_as() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Charlie', 3.12, x'00010203');", ()).await?;
+        conn.execute("INSERT INTO customer (name, value, image) VALUES ('Sarah', 0.99, x'09080706');", ()).await?;
+
+        let customers = conn.query_as::<CustomerByName>("SELECT id, name, value, image FROM customer;", ()).await?;
+
+        assert_eq!(customers.len(), 2);
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![0, 1, 2, 3]);
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].value, 0.99);
+        assert_eq!(customers[1].image, vec![9, 8, 7, 6]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_as_with_column_reorder() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        // SELECT columns in different order than struct fields
+        let customers = conn.query_as::<CustomerByName>("SELECT image, value, name, id FROM t;", ()).await?;
+
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].value, 3.12);
+        assert_eq!(customers[0].image, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_as_with_options() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, optional_value REAL, optional_note TEXT, optional_data BLOB, optional_count INTEGER);",
+            (),
+        ).await?;
+        conn.execute("INSERT INTO t (name, optional_value, optional_data) VALUES ('Charlie', 3.12, x'010203');", ()).await?;
+        conn.execute("INSERT INTO t (name, optional_value, optional_note, optional_data, optional_count) VALUES ('Sarah', 0.99, 'Some note', x'09080706', 42);", ()).await?;
+
+        let customers = conn.query_as::<CustomerByNameWithOptions>("SELECT id, name, optional_value, optional_note, optional_data, optional_count FROM t;", ()).await?;
+
+        assert_eq!(customers[0].id, 1);
+        assert_eq!(customers[0].name, "Charlie");
+        assert_eq!(customers[0].optional_value, Some(3.12));
+        assert_eq!(customers[0].optional_note, None);
+        assert_eq!(customers[0].optional_data, Some(vec![1, 2, 3]));
+        assert_eq!(customers[0].optional_count, None);
+
+        assert_eq!(customers[1].id, 2);
+        assert_eq!(customers[1].name, "Sarah");
+        assert_eq!(customers[1].optional_value, Some(0.99));
+        assert_eq!(customers[1].optional_note, Some("Some note".to_string()));
+        assert_eq!(customers[1].optional_data, Some(vec![9, 8, 7, 6]));
+        assert_eq!(customers[1].optional_count, Some(42));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_as_missing_column_error() -> TursoMapperResult<()> {
+        let db = Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL NOT NULL, image BLOB NOT NULL);", ()).await?;
+        conn.execute("INSERT INTO t (name, value, image) VALUES ('Charlie', 3.12, x'01020300');", ()).await?;
+
+        // Omit 'image' column -- should fail with ColumnNotFound
+        let result = conn.query_as::<CustomerByName>("SELECT id, name, value FROM t;", ()).await;
+        assert!(result.is_err());
 
         Ok(())
     }
