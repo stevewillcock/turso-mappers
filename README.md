@@ -1,5 +1,7 @@
 # turso-mappers
 
+![logo-export.svg](assets/logo.svg)
+
 Map [turso](https://github.com/tursodatabase/turso) database rows to Rust structs. Provides traits and derive macros that eliminate boilerplate when converting query results into typed data structures.
 
 Three approaches to row mapping:
