@@ -14,4 +14,4 @@ turso-mappers-derive = { version = "0.2.0", path = "turso-mappers-derive" }
 
 
 [dev-dependencies]
-tokio = { version = "1.46.1", features = ["rt", "macros", "test-util", "rt-multi-thread"] }
+tokio = { version = "1.49.0", features = ["rt", "macros", "test-util", "rt-multi-thread"] }
