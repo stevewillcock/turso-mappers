@@ -1,5 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
+extern crate self as turso_mappers;
+
 use std::collections::HashMap;
 use std::future::Future;
 use turso::{Column, Connection, IntoParams};

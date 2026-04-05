@@ -84,26 +84,26 @@ fn impl_try_from_row_by_index(ast: DeriveInput) -> proc_macro2::TokenStream {
                     #f_ident: *row
                         .get_value(#idx)?
                         .as_integer()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", stringify!(#f_ident))))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not an integer", stringify!(#f_ident))))?
                 },
                 "String" => quote! {
                     #f_ident: row
                         .get_value(#idx)?
                         .as_text()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", stringify!(#f_ident))))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a string", stringify!(#f_ident))))?
                         .clone()
                 },
                 "f64" => quote! {
                     #f_ident: *row
                         .get_value(#idx)?
                         .as_real()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a real", stringify!(#f_ident))))?
                 },
                 "Vec<u8>" => quote! {
                     #f_ident: row
                         .get_value(#idx)?
                         .as_blob()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", stringify!(#f_ident))))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a blob", stringify!(#f_ident))))?
                         .clone()
                 },
                 _ => {
@@ -118,8 +118,8 @@ fn impl_try_from_row_by_index(ast: DeriveInput) -> proc_macro2::TokenStream {
         .collect::<Vec<_>>();
 
     quote! {
-        impl crate::TryFromRowByIndex for #ident {
-            fn try_from_row_by_index(row: turso::Row) -> crate::TursoMapperResult<Self> where Self: Sized {
+        impl turso_mappers::TryFromRowByIndex for #ident {
+            fn try_from_row_by_index(row: turso::Row) -> turso_mappers::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })
@@ -262,26 +262,26 @@ fn impl_try_from_row_by_name(ast: DeriveInput) -> proc_macro2::TokenStream {
                     #f_ident: *row
                         .get_value(indices[#idx])?
                         .as_integer()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not an integer", #f_name)))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not an integer", #f_name)))?
                 },
                 "String" => quote! {
                     #f_ident: row
                         .get_value(indices[#idx])?
                         .as_text()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a string", #f_name)))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a string", #f_name)))?
                         .clone()
                 },
                 "f64" => quote! {
                     #f_ident: *row
                         .get_value(indices[#idx])?
                         .as_real()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a real", #f_name)))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a real", #f_name)))?
                 },
                 "Vec<u8>" => quote! {
                     #f_ident: row
                         .get_value(indices[#idx])?
                         .as_blob()
-                        .ok_or_else(|| crate::TursoMapperError::ConversionError(format!("{} is not a blob", #f_name)))?
+                        .ok_or_else(|| turso_mappers::TursoMapperError::ConversionError(format!("{} is not a blob", #f_name)))?
                         .clone()
                 },
                 _ => {
@@ -295,14 +295,14 @@ fn impl_try_from_row_by_name(ast: DeriveInput) -> proc_macro2::TokenStream {
         .collect::<Vec<_>>();
 
     quote! {
-        impl crate::TryFromRowByName for #ident {
+        impl turso_mappers::TryFromRowByName for #ident {
             type Indices = [usize; #field_count];
 
-            fn resolve_indices(column_indices: &crate::ColumnIndices) -> crate::TursoMapperResult<Self::Indices> {
+            fn resolve_indices(column_indices: &turso_mappers::ColumnIndices) -> turso_mappers::TursoMapperResult<Self::Indices> {
                 Ok([#(#resolve_lookups,)*])
             }
 
-            fn try_from_row_by_name(row: turso::Row, indices: &Self::Indices) -> crate::TursoMapperResult<Self> where Self: Sized {
+            fn try_from_row_by_name(row: turso::Row, indices: &Self::Indices) -> turso_mappers::TursoMapperResult<Self> where Self: Sized {
                 Ok(Self {
                     #(#field_mappers,)*
                 })
